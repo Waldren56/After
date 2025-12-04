@@ -1071,12 +1071,28 @@ class F1MainApp:
                 time_str = session['time'].strftime('%d/%m %H:%M')
 
                 # Stato/Countdown
-                if session['status'] == 'upcoming' and session['countdown']:
-                    tk.Label(session_frame, text=f"{time_str} - ⏰ {session['countdown']}",
-                             font=('Arial', 10),
-                             bg=COLORS['bg_light'],
-                             fg=COLORS['blue'],
-                             width=25).pack(side='left', padx=10)
+                if session['status'] == 'upcoming':
+                    # Calcola countdown dinamico
+                    now = datetime.now()
+                    time_diff = session['time'] - now
+
+                    if time_diff.total_seconds() > 0:
+                        days = time_diff.days
+                        hours = time_diff.seconds // 3600
+                        minutes = (time_diff.seconds % 3600) // 60
+
+                        if days > 0:
+                            countdown_str = f"{days}d {hours}h"
+                        elif hours > 0:
+                            countdown_str = f"{hours}h {minutes}m"
+                        else:
+                            countdown_str = f"{minutes}m"
+
+                        tk.Label(session_frame, text=f"{time_str} - ⏰ {countdown_str}",
+                                 font=('Arial', 10),
+                                 bg=COLORS['bg_light'],
+                                 fg=COLORS['blue'],
+                                 width=25).pack(side='left', padx=10)
                     tk.Label(session_frame, text="Prossimamente",
                              font=('Arial', 9, 'bold'),
                              bg=COLORS['bg_light'],
@@ -1863,20 +1879,70 @@ class F1MainApp:
             print(f"Errore applicazione colori: {e}")
 
     def show_telemetry_popup(self, driver_data, mode="past"):
-        """Mostra popup di telemetria avanzata per un pilota"""
+        """Mostra popup di telemetria con dati REALI"""
         driver_name = driver_data.get('driver_name', 'Unknown')
         driver_code = driver_data.get('driver_code', 'Unknown')
         team = driver_data.get('team', 'Unknown')
 
-        # Crea nuova finestra INDIPENDENTE
+        print(f"\n🚀 AVVIO TELEMETRIA REALE per {driver_name}")
+
+        # Crea finestra
         popup = tk.Toplevel(self.root)
-        popup.title(f"📊 Telemetria Avanzata - {driver_name}")
+        popup.title(f"📊 Telemetria Reale - {driver_name}")
         popup.geometry("1200x900")
         popup.configure(bg=COLORS['bg'])
 
         # Frame principale con scroll
         main_frame = tk.Frame(popup, bg=COLORS['bg'])
         main_frame.pack(fill='both', expand=True, padx=10, pady=10)
+
+        # Barra di stato caricamento
+        status_frame = tk.Frame(main_frame, bg=COLORS['bg_dark'])
+        status_frame.pack(fill='x', pady=(0, 10))
+
+        status_label = tk.Label(status_frame, text="📡 Caricamento dati reali da FastF1...",
+                                font=('Arial', 11),
+                                bg=COLORS['bg_dark'],
+                                fg=COLORS['yellow'])
+        status_label.pack(pady=10)
+
+        # Progress bar
+        progress = ttk.Progressbar(status_frame, mode='indeterminate')
+        progress.pack(fill='x', padx=20, pady=(0, 10))
+        progress.start()
+
+        popup.update()
+
+        # CARICA DATI REALI IN THREAD SEPARATO
+        def load_and_display():
+            try:
+                # Carica dati reali
+                telemetry_real = self.load_real_telemetry_from_fastf1(driver_data)
+
+                # Aggiorna GUI nel thread principale
+                self.root.after(0, lambda: self._display_real_telemetry(
+                    popup, main_frame, driver_data, team, telemetry_real, status_label, progress
+                ))
+
+            except Exception as e:
+                self.root.after(0, lambda: self._display_error(
+                    popup, main_frame, f"Errore caricamento: {str(e)}", status_label, progress
+                ))
+
+        # Avvia thread caricamento
+        threading.Thread(target=load_and_display, daemon=True).start()
+
+        return popup
+
+    def _display_real_telemetry(self, popup, main_frame, driver_data, team, telemetry_real, status_label, progress):
+        """Visualizza telemetria reale"""
+        progress.stop()
+        progress.destroy()
+        status_label.destroy()
+
+        if not telemetry_real:
+            self._display_error(popup, main_frame, "Nessun dato reale disponibile", None, None)
+            return
 
         # Canvas per scroll
         canvas = tk.Canvas(main_frame, bg=COLORS['bg'], highlightthickness=0)
@@ -1898,18 +1964,26 @@ class F1MainApp:
         header_frame = tk.Frame(scrollable_frame, bg=COLORS['bg_dark'], padx=20, pady=20)
         header_frame.pack(fill='x', pady=(0, 20))
 
-        tk.Label(header_frame, text=f"📊 TELEMETRIA AVANZATA - {driver_name}",
+        session_info = telemetry_real['session_info']
+        tk.Label(header_frame, text=f"📊 TELEMETRIA REALE - {driver_data['driver_name']}",
                  font=('Arial', 18, 'bold'),
                  bg=COLORS['bg_dark'],
                  fg=COLORS['yellow']).pack(anchor='w')
 
-        tk.Label(header_frame, text=f"{team} | Modalità: {'REALE' if mode == 'live' else 'STORICA'}",
+        tk.Label(header_frame,
+                 text=f"{session_info['year']} {session_info['gp']} - {session_info['session']} | {session_info['driver']} | {team}",
                  font=('Arial', 12),
                  bg=COLORS['bg_dark'],
                  fg=COLORS['white']).pack(anchor='w', pady=(5, 0))
 
-        # Creazione dei grafici di telemetria
-        self.create_advanced_telemetry_charts(scrollable_frame, driver_data, team)
+        tk.Label(header_frame,
+                 text=f"📈 {session_info['total_laps']} giri analizzati | Dati reali FastF1",
+                 font=('Arial', 10),
+                 bg=COLORS['bg_dark'],
+                 fg=COLORS['green']).pack(anchor='w', pady=(5, 0))
+
+        # Crea grafici con dati reali
+        self.create_real_telemetry_charts(scrollable_frame, driver_data, self.get_team_color(team), telemetry_real)
 
         # Bottone chiudi
         close_btn = tk.Button(scrollable_frame, text="✖️ CHIUDI TELEMETRIA",
@@ -1921,9 +1995,56 @@ class F1MainApp:
                               pady=10)
         close_btn.pack(pady=20)
 
-        # Focus sulla finestra
-        popup.focus_set()
-        return popup
+    def _display_error(self, popup, main_frame, error_message, status_label, progress):
+        """Visualizza errore"""
+        if progress:
+            progress.stop()
+            progress.destroy()
+        if status_label:
+            status_label.destroy()
+
+        error_frame = tk.Frame(main_frame, bg=COLORS['bg'])
+        error_frame.pack(fill='both', expand=True)
+
+        tk.Label(error_frame, text="❌ ERRORE CARICAMENTO DATI",
+                 font=('Arial', 16, 'bold'),
+                 bg=COLORS['bg'],
+                 fg=COLORS['red']).pack(pady=20)
+
+        tk.Label(error_frame, text=error_message,
+                 font=('Arial', 11),
+                 bg=COLORS['bg'],
+                 fg=COLORS['white'],
+                 wraplength=800).pack(pady=10)
+
+        tk.Label(error_frame, text="\nPossibili cause:",
+                 font=('Arial', 11, 'bold'),
+                 bg=COLORS['bg'],
+                 fg=COLORS['yellow']).pack(pady=10)
+
+        causes = [
+            "1. FastF1 non ha dati per questa sessione",
+            "2. Connessione internet assente o lenta",
+            "3. Il pilota non ha completato giri nella sessione",
+            "4. Cache FastF1 vuota o corrotta"
+        ]
+
+        for cause in causes:
+            tk.Label(error_frame, text=cause,
+                     font=('Arial', 10),
+                     bg=COLORS['bg'],
+                     fg=COLORS['gray_light'],
+                     anchor='w').pack(pady=2)
+
+        # Bottone per usare dati simulati
+        sim_btn = tk.Button(error_frame, text="🎯 USA DATI SIMULATI",
+                            command=lambda: self._show_simulated_telemetry(popup, main_frame, error_frame, driver_data),
+                            bg=COLORS['blue'],
+                            fg='white',
+                            font=('Arial', 11, 'bold'),
+                            padx=20,
+                            pady=10)
+        sim_btn.pack(pady=20)
 
     def create_advanced_telemetry_charts(self, parent, driver_data, team):
         """Crea grafici di telemetria avanzata"""
@@ -3301,6 +3422,390 @@ class F1MainApp:
 
         return popup
 
+    def load_real_telemetry_from_fastf1(self, driver_data):
+        """Carica dati REALI di telemetria da FastF1"""
+        try:
+            print(f"\n" + "=" * 60)
+            print(f"📡 CARICAMENTO TELEMETRIA REALE per {driver_data['driver_name']}")
+            print("=" * 60)
+
+            # Ottieni parametri sessione
+            year = int(self.year_var.get())
+            gp = self.gp_var.get()
+            session_type = self.session_var.get()
+            driver_code = driver_data.get('driver_code')
+
+            if not all([year, gp, session_type, driver_code]):
+                print("❌ Parametri mancanti")
+                return None
+
+            print(f"🔍 Ricerca dati: {year} {gp} {session_type} - Pilota: {driver_code}")
+
+            # 1. CARICA SESSIONE FASTF1
+            try:
+                session = ff1.get_session(year, gp, session_type)
+                print(f"✅ Sessione trovata")
+            except Exception as e:
+                print(f"❌ Errore caricamento sessione: {e}")
+                return None
+
+            # 2. CARICA TUTTI I DATI
+            print("📥 Caricamento dati (può richiedere qualche minuto)...")
+            try:
+                # Carica tutto
+                session.load(
+                    laps=True,  # Tempi giro
+                    telemetry=True,  # Telemetria
+                    weather=False,  # Meteo (facoltativo)
+                    messages=False  # Messaggi (facoltativo)
+                )
+                print("✅ Dati caricati con successo")
+            except Exception as e:
+                print(f"⚠️ Caricamento parziale: {e}")
+                # Prova comunque a usare i dati disponibili
+                try:
+                    session.load(laps=True)
+                except:
+                    return None
+
+            # 3. OTTIENI GIRI DEL PILOTA
+            driver_laps = session.laps[session.laps['Driver'] == driver_code]
+
+            if driver_laps.empty:
+                print(f"❌ Nessun dato trovato per {driver_code}")
+                return None
+
+            print(f"✅ Trovati {len(driver_laps)} giri per {driver_code}")
+
+            # 4. ELABORA DATI TELEMETRIA
+            telemetry_data = {
+                'session_info': {
+                    'year': year,
+                    'gp': gp,
+                    'session': session_type,
+                    'driver': driver_code,
+                    'total_laps': len(driver_laps)
+                },
+                'laps': [],
+                'sector_times': {'S1': [], 'S2': [], 'S3': []},
+                'telemetry': {},
+                'stints': []
+            }
+
+            # 5. PROCESSA OGNI GIRO
+            for index, lap in driver_laps.iterrows():
+                lap_data = {
+                    'lap_number': int(lap['LapNumber']) if pd.notna(lap['LapNumber']) else 0,
+                    'lap_time': lap['LapTime'].total_seconds() if pd.notna(lap['LapTime']) else None,
+                    'compound': str(lap['Compound']).upper() if pd.notna(lap['Compound']) else 'UNKNOWN',
+                    'tyre_life': int(lap['TyreLife']) if pd.notna(lap['TyreLife']) else 0,
+                    'stint': int(lap['Stint']) if pd.notna(lap['Stint']) else 1,
+                    'pit_out_time': lap['PitOutTime'] if pd.notna(lap['PitOutTime']) else None,
+                    'pit_in_time': lap['PitInTime'] if pd.notna(lap['PitInTime']) else None,
+                    'is_pit_lap': pd.notna(lap['PitInTime']) or pd.notna(lap['PitOutTime']),
+                    'sector1_time': lap['Sector1Time'].total_seconds() if pd.notna(lap['Sector1Time']) else None,
+                    'sector2_time': lap['Sector2Time'].total_seconds() if pd.notna(lap['Sector2Time']) else None,
+                    'sector3_time': lap['Sector3Time'].total_seconds() if pd.notna(lap['Sector3Time']) else None
+                }
+
+                telemetry_data['laps'].append(lap_data)
+
+                # Raccogli tempi settore
+                if lap_data['sector1_time']:
+                    telemetry_data['sector_times']['S1'].append(lap_data['sector1_time'])
+                if lap_data['sector2_time']:
+                    telemetry_data['sector_times']['S2'].append(lap_data['sector2_time'])
+                if lap_data['sector3_time']:
+                    telemetry_data['sector_times']['S3'].append(lap_data['sector3_time'])
+
+            # 6. OTTIENI TELEMETRIA VELOCITÀ (se disponibile)
+            try:
+                if driver_code in session.car_data:
+                    car_data = session.car_data[driver_code]
+                    if 'Speed' in car_data.columns:
+                        # Campiona dati per non sovraccaricare
+                        sampled_speed = car_data['Speed'].iloc[::10]  # Ogni 10 campioni
+                        telemetry_data['telemetry']['speed_kmh'] = (sampled_speed * 3.6).tolist()
+                        telemetry_data['telemetry']['rpm'] = car_data['RPM'].iloc[
+                                                             ::10].tolist() if 'RPM' in car_data.columns else []
+                        telemetry_data['telemetry']['throttle'] = car_data['Throttle'].iloc[
+                                                                  ::10].tolist() if 'Throttle' in car_data.columns else []
+                        telemetry_data['telemetry']['brake'] = car_data['Brake'].iloc[
+                                                               ::10].tolist() if 'Brake' in car_data.columns else []
+                        print(f"✅ Telemetria velocità: {len(telemetry_data['telemetry']['speed_kmh'])} campioni")
+            except Exception as e:
+                print(f"⚠️ Telemetria dettagliata non disponibile: {e}")
+
+            # 7. ANALIZZA STINT
+            if 'Stint' in driver_laps.columns:
+                stint_numbers = driver_laps['Stint'].unique()
+                for stint in stint_numbers:
+                    stint_laps = driver_laps[driver_laps['Stint'] == stint]
+                    if not stint_laps.empty:
+                        stint_data = self._analyze_stint(stint_laps, stint)
+                        telemetry_data['stints'].append(stint_data)
+
+            print(f"✅ Telemetria reale elaborata: {len(telemetry_data['laps'])} giri")
+            print("=" * 60)
+
+            return telemetry_data
+
+        except Exception as e:
+            print(f"❌ Errore critico caricamento telemetria: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _analyze_stint(self, stint_laps, stint_number):
+        """Analizza dati di uno stint"""
+        stint_times = stint_laps['LapTime'].dropna()
+
+        if stint_times.empty:
+            return {
+                'stint': stint_number,
+                'laps': 0,
+                'avg_time': 0,
+                'best_time': 0,
+                'degradation': 0
+            }
+
+        stint_times_sec = stint_times.dt.total_seconds()
+
+        # Calcola degrado
+        degradation = 0
+        if len(stint_times_sec) >= 3:
+            laps = np.arange(len(stint_times_sec))
+            coeffs = np.polyfit(laps, stint_times_sec.values, 1)
+            degradation = coeffs[0]  # secondi/giro
+
+        # Compound usato
+        compound = 'UNKNOWN'
+        if 'Compound' in stint_laps.columns:
+            compound_series = stint_laps['Compound'].dropna()
+            if not compound_series.empty:
+                compound = str(compound_series.iloc[0]).upper()
+
+        return {
+            'stint': int(stint_number),
+            'laps': len(stint_laps),
+            'avg_time': float(stint_times_sec.mean()),
+            'best_time': float(stint_times_sec.min()),
+            'worst_time': float(stint_times_sec.max()),
+            'degradation': float(degradation),
+            'compound': compound,
+            'start_lap': int(stint_laps['LapNumber'].min()),
+            'end_lap': int(stint_laps['LapNumber'].max()),
+            'tyre_life_start': int(stint_laps['TyreLife'].min()) if 'TyreLife' in stint_laps.columns else 0,
+            'tyre_life_end': int(stint_laps['TyreLife'].max()) if 'TyreLife' in stint_laps.columns else 0
+        }
+
+    def create_real_telemetry_charts(self, parent, driver_data, team_color, telemetry_real):
+        """Crea grafici con dati REALI da FastF1"""
+        if not telemetry_real:
+            return self.create_advanced_telemetry_charts(parent, driver_data, team_color)
+
+        hex_color = team_color.lstrip('#')
+        rgb = tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+        mpl_color = (rgb[0] / 255, rgb[1] / 255, rgb[2] / 255)
+
+        # 1. GRAFICO TEMPI GIRO REALI
+        times_frame = tk.LabelFrame(parent, text=" ⏱️ TEMPI GIRO REALI ",
+                                    font=('Arial', 12, 'bold'),
+                                    bg=COLORS['bg_light'],
+                                    fg=COLORS['white'],
+                                    padx=10,
+                                    pady=10)
+        times_frame.pack(fill='x', pady=10, padx=5)
+
+        fig1 = Figure(figsize=(12, 4), dpi=80, facecolor=(0.05, 0.05, 0.05))
+        ax1 = fig1.add_subplot(111)
+
+        # Estrai tempi giro reali
+        laps_data = telemetry_real['laps']
+        lap_numbers = [lap['lap_number'] for lap in laps_data if lap['lap_time']]
+        lap_times = [lap['lap_time'] for lap in laps_data if lap['lap_time']]
+
+        if lap_numbers and lap_times:
+            ax1.plot(lap_numbers, lap_times, color=mpl_color, linewidth=2, marker='o', markersize=4)
+
+            # Evidenzia pit stops
+            pit_laps = [lap['lap_number'] for lap in laps_data if lap['is_pit_lap']]
+            for pit_lap in pit_laps:
+                if pit_lap in lap_numbers:
+                    idx = lap_numbers.index(pit_lap)
+                    ax1.plot(pit_lap, lap_times[idx], 's', color='red', markersize=8)
+
+            # Linea media
+            avg_time = np.mean(lap_times)
+            ax1.axhline(y=avg_time, color='yellow', linestyle='--', alpha=0.7,
+                        label=f'Media: {self._format_laptime(avg_time)}')
+
+            ax1.set_xlabel('Numero Giro', color='white', fontsize=10)
+            ax1.set_ylabel('Tempo (secondi)', color='white', fontsize=10)
+            ax1.set_title('Tempi Giro Reali (FastF1)', color='white', fontsize=12, fontweight='bold')
+            ax1.grid(True, alpha=0.3, linestyle='--')
+            ax1.set_facecolor((0.1, 0.1, 0.1))
+            ax1.tick_params(colors='white')
+            ax1.legend(facecolor=(0.1, 0.1, 0.1), edgecolor='white', labelcolor='white')
+
+        else:
+            ax1.text(0.5, 0.5, 'Nessun dato tempo giro disponibile',
+                     ha='center', va='center', color='white', fontsize=12)
+            ax1.set_facecolor((0.1, 0.1, 0.1))
+
+        canvas1 = FigureCanvasTkAgg(fig1, times_frame)
+        canvas1.draw()
+        canvas1.get_tk_widget().pack(fill='x', padx=5, pady=5)
+
+        # 2. GRAFICO VELOCITÀ PER SETTORE REALI
+        sector_frame = tk.LabelFrame(parent, text=" 🚀 VELOCITÀ SETTORE REALI ",
+                                     font=('Arial', 12, 'bold'),
+                                     bg=COLORS['bg_light'],
+                                     fg=COLORS['white'],
+                                     padx=10,
+                                     pady=10)
+        sector_frame.pack(fill='x', pady=10, padx=5)
+
+        fig2 = Figure(figsize=(12, 4), dpi=80, facecolor=(0.05, 0.05, 0.05))
+        ax2 = fig2.add_subplot(111)
+
+        sector_times = telemetry_real['sector_times']
+
+        if any(sector_times.values()):
+            # Calcola velocità medie per settore (approssimativo)
+            # Lunghezza circuito media: ~5km, diviso 3 settori
+            circuit_length = 5000  # metri
+            sector_length = circuit_length / 3
+
+            sectors = ['S1', 'S2', 'S3']
+            avg_speeds = []
+
+            for sector in sectors:
+                times = sector_times.get(sector, [])
+                if times:
+                    avg_time = np.mean(times)
+                    avg_speed = (sector_length / avg_time) * 3.6  # km/h
+                    avg_speeds.append(avg_speed)
+                else:
+                    avg_speeds.append(0)
+
+            colors = ['#FF5555', '#55FF55', '#5555FF']
+            bars = ax2.bar(sectors, avg_speeds, color=colors, edgecolor='white', linewidth=1.5)
+
+            ax2.set_xlabel('Settore', color='white', fontsize=10)
+            ax2.set_ylabel('Velocità Media (km/h)', color='white', fontsize=10)
+            ax2.set_title('Velocità Media per Settore', color='white', fontsize=12, fontweight='bold')
+            ax2.grid(True, alpha=0.3, linestyle='--', axis='y')
+            ax2.set_facecolor((0.1, 0.1, 0.1))
+            ax2.tick_params(colors='white')
+
+            # Aggiungi valori sulle barre
+            for bar in bars:
+                height = bar.get_height()
+                if height > 0:
+                    ax2.text(bar.get_x() + bar.get_width() / 2., height + 1,
+                             f'{height:.1f} km/h',
+                             ha='center', va='bottom', color='white', fontweight='bold')
+        else:
+            ax2.text(0.5, 0.5, 'Nessun dato settore disponibile',
+                     ha='center', va='center', color='white', fontsize=12)
+            ax2.set_facecolor((0.1, 0.1, 0.1))
+
+        canvas2 = FigureCanvasTkAgg(fig2, sector_frame)
+        canvas2.draw()
+        canvas2.get_tk_widget().pack(fill='x', padx=5, pady=5)
+
+        # 3. ANALISI STINT REALI
+        stints_frame = tk.LabelFrame(parent, text=" 🏁 ANALISI STINT REALI ",
+                                     font=('Arial', 12, 'bold'),
+                                     bg=COLORS['bg_light'],
+                                     fg=COLORS['white'],
+                                     padx=10,
+                                     pady=10)
+        stints_frame.pack(fill='x', pady=10, padx=5)
+
+        stints = telemetry_real.get('stints', [])
+
+        if stints:
+            # Crea tabella stint
+            stint_tree = ttk.Treeview(stints_frame,
+                                      columns=('Stint', 'Giri', 'Media', 'Migliore', 'Degrado', 'Compound'),
+                                      show='headings', height=len(stints))
+
+            stint_tree.heading('Stint', text='Stint')
+            stint_tree.heading('Giri', text='Giri')
+            stint_tree.heading('Media', text='Tempo Medio')
+            stint_tree.heading('Migliore', text='Migliore')
+            stint_tree.heading('Degrado', text='Degrado/s')
+            stint_tree.heading('Compound', text='Gomma')
+
+            stint_tree.column('Stint', width=60, anchor='center')
+            stint_tree.column('Giri', width=60, anchor='center')
+            stint_tree.column('Media', width=100, anchor='center')
+            stint_tree.column('Migliore', width=100, anchor='center')
+            stint_tree.column('Degrado', width=80, anchor='center')
+            stint_tree.column('Compound', width=80, anchor='center')
+
+            for stint in stints:
+                avg_time_str = self._format_laptime(stint['avg_time']) if stint['avg_time'] > 0 else 'N/A'
+                best_time_str = self._format_laptime(stint['best_time']) if stint['best_time'] > 0 else 'N/A'
+                degradation_str = f"+{stint['degradation']:.3f}" if stint[
+                                                                        'degradation'] > 0 else f"{stint['degradation']:.3f}"
+
+                stint_tree.insert('', 'end', values=(
+                    stint['stint'],
+                    stint['laps'],
+                    avg_time_str,
+                    best_time_str,
+                    degradation_str,
+                    stint['compound']
+                ))
+
+            stint_tree.pack(fill='x', padx=5, pady=5)
+        else:
+            tk.Label(stints_frame, text="Nessun dato stint disponibile",
+                     font=('Arial', 10),
+                     bg=COLORS['bg_light'],
+                     fg=COLORS['gray']).pack(pady=20)
+
+        # 4. TELEMETRIA VELOCITÀ REALE
+        if 'telemetry' in telemetry_real and 'speed_kmh' in telemetry_real['telemetry']:
+            speed_frame = tk.LabelFrame(parent, text=" 📈 TELEMETRIA VELOCITÀ REALE ",
+                                        font=('Arial', 12, 'bold'),
+                                        bg=COLORS['bg_light'],
+                                        fg=COLORS['white'],
+                                        padx=10,
+                                        pady=10)
+            speed_frame.pack(fill='x', pady=10, padx=5)
+
+            fig3 = Figure(figsize=(12, 4), dpi=80, facecolor=(0.05, 0.05, 0.05))
+            ax3 = fig3.add_subplot(111)
+
+            speeds = telemetry_real['telemetry']['speed_kmh']
+            samples = list(range(len(speeds)))
+
+            ax3.plot(samples, speeds, color=mpl_color, linewidth=1.5, alpha=0.8)
+            ax3.fill_between(samples, speeds, min(speeds), alpha=0.2, color=mpl_color)
+
+            ax3.set_xlabel('Campioni', color='white', fontsize=10)
+            ax3.set_ylabel('Velocità (km/h)', color='white', fontsize=10)
+            ax3.set_title('Telemetria Velocità (FastF1)', color='white', fontsize=12, fontweight='bold')
+            ax3.grid(True, alpha=0.2, linestyle='--')
+            ax3.set_facecolor((0.1, 0.1, 0.1))
+            ax3.tick_params(colors='white')
+
+            canvas3 = FigureCanvasTkAgg(fig3, speed_frame)
+            canvas3.draw()
+            canvas3.get_tk_widget().pack(fill='x', padx=5, pady=5)
+
+    def _format_laptime(self, seconds):
+        """Formatta secondi in mm:ss.ms"""
+        if not seconds:
+            return "N/A"
+        minutes = int(seconds // 60)
+        secs = seconds % 60
+        return f"{minutes}:{secs:06.3f}"
+
     def stop_live(self):
         """Ferma modalità LIVE"""
         self.real_data_active = False
@@ -3655,6 +4160,43 @@ class LiveDataManager:
         try:
             print("🔍 Ricerca sessioni LIVE attive...")
 
+            # PRIMA verifica il calendario caricato da FastF1
+            if hasattr(self.app, 'current_schedule') and self.app.current_schedule:
+                now = datetime.now()
+
+                for gp in self.app.current_schedule:
+                    for session in gp.get('sessions', []):
+                        session_time = session.get('time')
+
+                        if isinstance(session_time, str):
+                            try:
+                                session_time = datetime.fromisoformat(session_time.replace('Z', '+00:00'))
+                            except:
+                                continue
+
+                        # Calcola durata approssimativa della sessione
+                        session_end = session_time + timedelta(hours=2)  # 2 ore tipiche per le sessioni
+
+                        # Verifica se la sessione è in corso
+                        if session_time <= now <= session_end:
+                            print(f"✅ SESSIONE LIVE TROVATA nel calendario FastF1:")
+                            print(f"   GP: {gp.get('gp_name')}")
+                            print(f"   Sessione: {session.get('name')}")
+                            print(f"   Ora inizio: {session_time}")
+
+                            return {
+                                'session_key': None,  # Non abbiamo session_key dal calendario FastF1
+                                'gp_name': gp.get('gp_name'),
+                                'session_name': session.get('name'),
+                                'session_code': session.get('code'),
+                                'session_time': session_time,
+                                'status': 'live',
+                                'source': 'fastf1_calendar'
+                            }
+
+            # SECONDO: se non troviamo nel calendario, prova con OpenF1 API
+            print("🔍 Nessuna sessione trovata nel calendario FastF1, provo OpenF1 API...")
+
             url = "https://api.openf1.org/v1/sessions"
 
             # Cerca sessioni che stanno ORA accadendo
@@ -3671,7 +4213,7 @@ class LiveDataManager:
 
             if response.status_code == 200:
                 sessions = response.json()
-                print(f"✅ Trovate {len(sessions)} sessioni ATTIVE ORA")
+                print(f"✅ Trovate {len(sessions)} sessioni ATTIVE ORA su OpenF1")
 
                 if sessions:
                     session = sessions[0]  # Prendi la prima sessione attiva
@@ -3687,35 +4229,81 @@ class LiveDataManager:
                         'circuit_key': session.get('circuit_key'),
                         'start_time': session.get('date_start'),
                         'end_time': session.get('date_end'),
-                        'status': 'live'
+                        'status': 'live',
+                        'source': 'openf1_api'
                     }
 
             print("❌ Nessuna sessione attiva ora")
 
-            # Fallback: cerca sessioni che iniziano presto (entro 1 ora)
-            params_future = {
-                'date_start__gte': now_iso,
-                'date_start__lte': (now + timedelta(hours=1)).isoformat() + "Z"
-            }
+            # TERZO: cerca la PROSSIMA sessione nel calendario FastF1
+            if hasattr(self.app, 'current_schedule') and self.app.current_schedule:
+                now = datetime.now()
+                next_session_info = None
+                min_diff = float('inf')
 
-            response_future = requests.get(url, params=params_future, timeout=10)
-            if response_future.status_code == 200:
-                future_sessions = response_future.json()
-                if future_sessions:
-                    session = future_sessions[0]
-                    print(f"\n⏰ SESSIONE PROSSIMA tra {session.get('date_start')}")
+                for gp in self.app.current_schedule:
+                    for session in gp.get('sessions', []):
+                        session_time = session.get('time')
+
+                        if isinstance(session_time, str):
+                            try:
+                                session_time = datetime.fromisoformat(session_time.replace('Z', '+00:00'))
+                            except:
+                                continue
+
+                        # Calcola quanto manca alla sessione
+                        time_diff = (session_time - now).total_seconds()
+
+                        # Cerca la prossima sessione (non ancora iniziata)
+                        if time_diff > 0 and time_diff < min_diff:
+                            min_diff = time_diff
+                            next_session_info = {
+                                'gp': gp,
+                                'session': session,
+                                'session_time': session_time,
+                                'time_diff': time_diff
+                            }
+
+                if next_session_info:
+                    gp = next_session_info['gp']
+                    session = next_session_info['session']
+                    session_time = next_session_info['session_time']
+
+                    # Formatta il countdown
+                    days = int(next_session_info['time_diff'] // 86400)
+                    hours = int((next_session_info['time_diff'] % 86400) // 3600)
+                    minutes = int((next_session_info['time_diff'] % 3600) // 60)
+
+                    if days > 0:
+                        countdown_str = f"{days}d {hours}h"
+                    elif hours > 0:
+                        countdown_str = f"{hours}h {minutes}m"
+                    else:
+                        countdown_str = f"{minutes}m"
+
+                    print(f"\n⏰ PROSSIMA SESSIONE:")
+                    print(f"   GP: {gp.get('gp_name')}")
+                    print(f"   Sessione: {session.get('name')}")
+                    print(f"   Ora: {session_time}")
+                    print(f"   Tra: {countdown_str}")
+
                     return {
-                        'session_key': session.get('session_key'),
-                        'gp_name': session.get('location'),
-                        'session_name': session.get('session_name'),
-                        'start_time': session.get('date_start'),
-                        'status': 'upcoming'
+                        'session_key': None,
+                        'gp_name': gp.get('gp_name'),
+                        'session_name': session.get('name'),
+                        'session_code': session.get('code'),
+                        'session_time': session_time,
+                        'countdown': countdown_str,
+                        'status': 'upcoming',
+                        'source': 'fastf1_calendar'
                     }
 
             return None
 
         except Exception as e:
             print(f"❌ Errore ricerca sessioni: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def stop_live_data(self):
