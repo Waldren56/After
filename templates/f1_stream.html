@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ stream.title }}</title>
+    <link rel="stylesheet" href="/static/style.css"> 
+    <style>
+        /* Stili specifici per la pagina di streaming */
+        body {
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #1e1e1e, #000);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-bottom: 50px; 
+        }
+        header {
+            width: 100%;
+            padding: 20px;
+            text-align: center;
+            background-color: #2a0055;
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .stream-container {
+            width: 90%;
+            max-width: 1200px;
+            /* Tecnica per mantenere l'aspect ratio 16:9 responsive */
+            position: relative;
+            padding-bottom: 56.25%; /* 16:9 ratio */
+            height: 0;
+            overflow: hidden;
+            margin-top: 20px;
+            box-shadow: 0 0 30px rgba(75, 0, 118, 0.5); 
+            border-radius: 10px;
+            background-color: #000;
+        }
+        .stream-container iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .note {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #333;
+            border-left: 5px solid #3b028b;
+            max-width: 1200px;
+            width: 90%;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+        .note p {
+            margin: 0;
+        }
+        .back-link {
+            color: #3b028b; 
+            text-decoration: none; 
+            margin-top: 20px;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+    </style>
+</head>
+<body>
+    <header>{{ stream.title }}</header>
+
+    <div class="stream-container">
+        <iframe 
+            src="https://www.hattrick.ws/live2.htm" 
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+            allowfullscreen>
+        </iframe>
+    </div>
+
+    <div class="note">
+        <p><strong>ATTENZIONE: Streaming Video</strong></p>
+        <p>Questo spazio è destinato all'incorporazione di un feed video live. Per lo streaming legale della Formula 1 in Italia, è necessario incorporare contenuti da fonti autorizzate o con diritti di distribuzione, ad esempio tramite un feed YouTube pubblico o un proprio media server (RTMP/HLS) se si possiedono i diritti.</p>
+    </div>
+    
+    <a href="/" class="back-link">
+        ← Torna alla Home Hub
+    </a>
+</body>
+</html>

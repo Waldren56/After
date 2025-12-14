@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>F1 Live Tracker</title>
+<link rel="stylesheet" href="/static/style.css"> 
+<style>
+/* Stili specifici per la tabella F1 - puoi spostarli in static/style.css se vuoi */
+body {
+    height: 100vh;
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: linear-gradient(135deg, #1e1e1e, #000);
+    color: white;
+}
+header {
+    padding: 20px;
+    text-align: center;
+    background-color: #2a0055;
+    font-size: 2em;
+    font-weight: bold;
+}
+
+.session-info {
+    text-align: center;
+    margin: 20px auto;
+    font-size: 1.2em;
+    padding: 10px;
+    border: 1px solid #ff5722; /* Bordo per evidenziare lo stato */
+    background-color: #1a0033;
+    border-radius: 8px;
+    max-width: 90%;
+}
+.update-time {
+    text-align: center;
+    margin: 10px;
+    font-size: 0.9em;
+    color: #aaa;
+}
+table {
+    margin: 20px auto;
+    border-collapse: separate; 
+    border-spacing: 0;
+    width: 90%;
+    max-width: 1200px;
+}
+
+th, td {
+    padding: 10px;
+    border: 1px solid #555;
+    text-align: center;
+}
+
+th {
+    background-color: #3b0066;
+}
+
+th:first-child {
+    border-top-left-radius: 10px;
+}
+
+th:last-child {
+    border-top-right-radius: 10px;
+}
+
+tr:nth-child(even) {background-color: #2a004d;}
+tr:nth-child(odd) {background-color: #3b0066;}
+td:nth-child(1) {
+    font-weight: bold;
+    width: 5%;
+}
+/* STILI MODALE */
+.modal {
+    display: none; 
+    position: fixed; 
+    z-index: 1; 
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto; 
+    background-color: rgba(0,0,0,0.7); 
+}
+
+.modal-content {
+    background-color: #1e1e1e;
+    margin: 10% auto; 
+    padding: 30px;
+    border: 2px solid #ff5722;
+    width: 80%; 
+    max-width: 500px;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+    color: white;
+}
+
+.close-button {
+    color: #ff5722;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+}
+
+.close-button:hover,
+.close-button:focus {
+    color: #fff;
+    text-decoration: none;
+    cursor: pointer;
+}
+.modal-content h2, .modal-content h3 {
+    color: #ff5722;
+    border-bottom: 1px solid #333;
+    padding-bottom: 5px;
+}
+
+</style>
+</head>
+<body>
+
+<header>
+    F1 Live Tracker
+</header>
+
+<div id="sessionInfo" class="session-info">Caricamento stato sessione...</div>
+<div id="updateTime" class="update-time"></div>
+
+<table>
+    <tbody id="lapTableBody">
+        <tr>
+            <th>Pos</th>
+            <th>Pilota</th>
+            <th>Giro</th>
+            <th>Tempo sul giro</th>
+            <th>Settore 1</th>
+            <th>Settore 2</th>
+            <th>Settore 3</th>
+        </tr>
+    </tbody>
+</table>
+
+<div id="driverDetailsModal" class="modal">
+    <div class="modal-content">
+        <span class="close-button">&times;</span>
+        <div id="driverDetailsContent">
+            Caricamento...
+        </div>
+    </div>
+</div>
+<script>
+const lapTableBody = document.getElementById('lapTableBody');
+const sessionInfoElement = document.getElementById('sessionInfo');
+const updateTimeElement = document.getElementById('updateTime');
+
+// Configurazione WebSocket (Assumi porta 8000 per l'F1 Server)
+const ws = new WebSocket(`ws://${window.location.host}/ws/f1/live`);
+
+// 1. Funzione per aggiornare la tabella
+const updateTable = (data) => {
+    // 2. Pulisci il corpo della tabella (eccetto l'header)
+    const tableElement = lapTableBody;
+    // Pulisce solo le righe dei dati, mantiene l'header (riga 0)
+    while (tableElement.rows.length > 1) {
+        tableElement.deleteRow(1);
+    }
+
+    // 3. Popola la tabella con i dati
+    if (data.laps && data.laps.length > 0) {
+        data.laps.forEach((lap, index) => {
+            let row = tableElement.insertRow();
+            
+            // AGGIUNTA: Aggiungi l'attributo del pilota per la funzione dblclick
+            row.setAttribute("data-driver-abbr", lap.Driver); 
+            row.addEventListener('dblclick', function() {
+                openDriverDetailsModal(lap.Driver);
+            });
+
+            // Colonna Posizione
+            row.insertCell(0).innerText = index + 1;
+
+            // Altre Colonne (I tempi sono già stringhe formattate grazie al backend)
+            row.insertCell(1).innerText = lap.Driver ?? "-";
+            row.insertCell(2).innerText = lap.LapNumber ?? "-";
+            row.insertCell(3).innerText = lap.LapTime ?? "-";
+            row.insertCell(4).innerText = lap.Sector1Time ?? "-";
+            row.insertCell(5).innerText = lap.Sector2Time ?? "-";
+            row.insertCell(6).innerText = lap.Sector3Time ?? "-";
+        });
+    } else {
+        // Se non ci sono giri (es. tra le sessioni o stagione finita), la tabella resta vuota
+    }
+};
+
+ws.onopen = function() {
+    sessionInfoElement.innerText = "Connessione stabilita. In attesa di dati live...";
+};
+
+ws.onmessage = function(event) {
+    let data = JSON.parse(event.data);
+    
+    // Aggiorna l'orario e lo stato
+    updateTimeElement.innerText = "Ultimo aggiornamento: " + data.last_update;
+    sessionInfoElement.innerHTML = data.session_info;
+
+    updateTable(data);
+};
+
+// Gestione degli errori di connessione
+ws.onerror = function(error) {
+    console.error("Errore WebSocket F1:", error);
+    sessionInfoElement.innerText = "Connessione dati persa o server non attivo.";
+};
+
+
+// ===============================================
+// NUOVA FUNZIONALITÀ: MODALE DETTAGLI PILOTA
+// ===============================================
+
+const driverDetailsModal = document.getElementById('driverDetailsModal');
+const driverDetailsContent = document.getElementById('driverDetailsContent');
+const closeModal = document.querySelector('.close-button');
+
+// Chiudi modale al click sulla 'x'
+closeModal.onclick = function() {
+    driverDetailsModal.style.display = 'none';
+}
+
+// Chiudi modale al click fuori dalla finestra
+window.onclick = function(event) {
+    if (event.target == driverDetailsModal) {
+        driverDetailsModal.style.display = 'none';
+    }
+}
+
+/**
+ * Apre il modale e carica i dettagli del pilota tramite API.
+ * @param {string} driverAbbr - L'abbreviazione del pilota (es. "VER").
+ */
+async function openDriverDetailsModal(driverAbbr) {
+    driverDetailsContent.innerHTML = `<p style="text-align:center;">Caricamento dettagli per <strong>${driverAbbr}</strong>...</p>`;
+    driverDetailsModal.style.display = 'block';
+
+    try {
+        const response = await fetch(`/api/f1/driver_details/${driverAbbr}`);
+        if (!response.ok) {
+            const errorData = await response.json();
+            driverDetailsContent.innerHTML = `
+                <h2>ERRORE</h2>
+                <p>Impossibile caricare i dati del pilota <strong>${driverAbbr}</strong>.</p>
+                <p>Dettaglio: ${errorData.detail}</p>
+            `;
+            return;
+        }
+        const data = await response.json();
+        
+        // Renderizza i dati
+        driverDetailsContent.innerHTML = `
+            <h2>${data.DriverInfo.DriverName} (#${data.DriverInfo.DriverNumber})</h2>
+            <p><strong>Team:</strong> ${data.DriverInfo.TeamName}</p>
+            <p><strong>Posizione Attuale:</strong> <strong>${data.DriverInfo.CurrentPosition}</strong></p>
+            <hr>
+            <h3>Prestazioni del Giro</h3>
+            <p><strong>Best Lap:</strong> ${data.LapMetrics.BestLapTime}</p>
+            <p><strong>Last Lap:</strong> ${data.LapMetrics.LastLapTime}</p>
+            <p><strong>Delta (Last-Best):</strong> ${data.LapMetrics.DeltaLastToBest}</p>
+            <hr>
+            <h3>Distanze</h3>
+            <p><strong>Gap to Leader:</strong> ${data.RaceMetrics.GapToLeader}</p>
+            <p><strong>Gap to Ahead:</strong> ${data.RaceMetrics.GapToAhead}</p>
+        `;
+
+    } catch (error) {
+        driverDetailsContent.innerHTML = `<p>Errore di rete o server non raggiungibile: ${error.message}</p>`;
+        console.error("Errore nel fetch dei dettagli pilota:", error);
+    }
+}
+
+</script>
+</body>
+</html>
