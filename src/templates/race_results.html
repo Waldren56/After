@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Fast F1 Archive - Risultati Gara</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f4; color: #333; margin: 20px; }
+        .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1, h2 { text-align: center; color: #E10600; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #333; color: white; }
+        tr:hover { background-color: #f1f1f1; cursor: pointer; } 
+        .points { font-weight: bold; color: green; }
+
+        /* Stile Modale/Popup */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+        .modal-content { background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 80%; border-radius: 10px; }
+        .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; }
+        .close:hover, .close:focus { color: #000; text-decoration: none; cursor: pointer; }
+        .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏁 Fast F1 Archive (Stagione {{ year }})</h1>
+        <h2>{{ race_name }}</h2>
+        <p style="text-align: center;">Circuito: <strong>{{ race_name }}</strong></p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Pos</th>
+                    <th>Pilota</th>
+                    <th>Scuderia</th>
+                    <th>Giri</th>
+                    <th>Tempo/Status</th>
+                    <th>Punti</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for result in results %}
+                <tr ondblclick="handleDriverClick('{{ result.DriverId }}', '{{ result.Pilota }}')" data-driver-id="{{ result.DriverId }}">
+                    <td>{{ result.Pos }}</td>
+                    <td>{{ result.Pilota }}</td>
+                    <td>{{ result.Scuderia }}</td>
+                    <td>{{ result.Giri }}</td>
+                    <td>{{ result['Tempo/Status'] }}</td>
+                    <td class="points">{{ result.Punti }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <p style="text-align: center; margin-top: 30px;">Dati forniti da FastF1 API</p>
+    </div>
+
+    <div id="detailsModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('detailsModal')">&times;</span>
+            <h3 id="detailsTitle">Dettagli Pilota</h3>
+            
+            <div id="detailsContainer">
+                <p>Nome Completo: <strong id="det-name"></strong></p>
+                <p>Team: <strong id="det-team"></strong> (<span id="det-color" style="padding: 2px 5px; border-radius: 3px;"></span>)</p>
+                <hr>
+                
+                <div class="details-grid">
+                    <div>
+                        <h4>Tempi e Gap</h4>
+                        <p>Giro Veloce: <strong id="det-fastest-lap"></strong></p>
+                        <p>Ultimo Giro: <strong id="det-last-lap"></strong></p>
+                        <p>Delta (Ultimo - Veloce): <strong id="det-delta"></strong></p>
+                    </div>
+                    <div>
+                        <h4>Pit Stop e Gomme</h4>
+                        <p>Pit Stop totali: <strong id="det-pitstops"></strong></p>
+                        <table style="font-size: 0.9em; width: 100%;">
+                            <thead><tr><th>Gomma</th><th>Giri per Stint</th></tr></thead>
+                            <tbody id="det-tyre-history"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="telemetryContainer" style="margin-top: 30px; display: none;">
+                <h4>Telemetria Giro Veloce</h4>
+                <p>Velocità media (Gara): <strong id="tel-avg-speed"></strong> km/h</p>
+                <p>RPM medio (Giro Veloce): <strong id="tel-avg-rpm"></strong></p>
+                
+                <canvas id="speedChart" width="800" height="400"></canvas>
+                <canvas id="throttleBrakeChart" width="800" height="400"></canvas>
+            </div>
+            
+            <button onclick="showTelemetry()">Mostra Telemetria</button>
+            <button onclick="showDetails()">Mostra Dettagli</button>
+        </div>
+    </div>
+
+    <script>
+        let currentDriverId = null;
+        let currentDriverName = null;
+        let speedChartInstance = null;
+        let throttleBrakeChartInstance = null;
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        function handleDriverClick(driverId, driverName) {
+            currentDriverId = driverId;
+            currentDriverName = driverName;
+            
+            const choice = prompt(`Cosa vuoi visualizzare per ${driverName}?\nDigita '1' per Dettagli o '2' per Telemetria.`);
+            
+            if (choice === '1') {
+                fetchDetails(driverId);
+            } else if (choice === '2') {
+                fetchTelemetry(driverId);
+            } else {
+                alert("Scelta non valida.");
+            }
+        }
+
+        function showDetails() {
+             document.getElementById('detailsContainer').style.display = 'block';
+             document.getElementById('telemetryContainer').style.display = 'none';
+        }
+
+        function showTelemetry() {
+             document.getElementById('detailsContainer').style.display = 'none';
+             document.getElementById('telemetryContainer').style.display = 'block';
+        }
+
+
+        function fetchDetails(driverId) {
+            document.getElementById('detailsTitle').innerText = `Dettagli: ${currentDriverName}`;
+            showDetails(); 
+            document.getElementById('detailsModal').style.display = 'block';
+            
+            fetch(`/api/details/${driverId}`)
+                .then(response => {
+                    if (!response.ok) {
+                         // Se l'API restituisce un errore 4xx o 5xx
+                        throw new Error(`Errore HTTP: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    document.getElementById('det-name').innerText = data.fullName;
+                    document.getElementById('det-team').innerText = data.teamName;
+                    
+                    const colorSpan = document.getElementById('det-color');
+                    colorSpan.innerText = data.teamName;
+                    colorSpan.style.backgroundColor = data.teamColor;
+                    colorSpan.style.color = 'white'; 
+
+                    document.getElementById('det-fastest-lap').innerText = data.fastestLap;
+                    document.getElementById('det-last-lap').innerText = data.lastLap;
+                    document.getElementById('det-delta').innerText = data.delta;
+                    document.getElementById('det-pitstops').innerText = data.pitStopsCount;
+                    
+                    // Nel fetchDetails, modifica la parte che gestisce tyreHistory:
+                    const tyreBody = document.getElementById('det-tyre-history');
+                    tyreBody.innerHTML = '';
+                    if (data.tyreHistory && data.tyreHistory.length > 0) {
+                        data.tyreHistory.forEach(stint => {
+                            const row = tyreBody.insertRow();
+                            row.insertCell().innerText = stint.tyre_compound || 'N/A';
+                            row.insertCell().innerText = stint.giri || 0;
+                        });
+                    } else {
+                        const row = tyreBody.insertRow();
+                        const cell = row.insertCell();
+                        cell.colSpan = 2;
+                        cell.innerText = 'Nessun dato gomme disponibile';
+                        cell.style.textAlign = 'center';
+                        cell.style.fontStyle = 'italic';
+                    }
+                })
+                .catch(error => {
+                    console.error('Errore nel recupero dei dettagli:', error);
+                    alert("Impossibile caricare i dettagli del pilota. (Controlla la console del server per il traceback)");
+                });
+        }
+
+        function fetchTelemetry(driverId) {
+            document.getElementById('detailsTitle').innerText = `Telemetria: ${currentDriverName}`;
+            showTelemetry(); 
+            document.getElementById('detailsModal').style.display = 'block';
+
+            fetch(`/api/telemetry/${driverId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Errore HTTP: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    document.getElementById('tel-avg-speed').innerText = data.avgRaceSpeed.toFixed(2);
+                    document.getElementById('tel-avg-rpm').innerText = data.avgRpm.toFixed(0);
+                    
+                    if (speedChartInstance) speedChartInstance.destroy();
+                    if (throttleBrakeChartInstance) throttleBrakeChartInstance.destroy();
+
+                    // --- Grafico 1: Velocità ---
+                    const ctxSpeed = document.getElementById('speedChart').getContext('2d');
+                    speedChartInstance = new Chart(ctxSpeed, {
+                        type: 'line',
+                        data: {
+                            labels: data.fastestLapTelemetry.Distance.map(d => d.toFixed(0) + 'm'),
+                            datasets: [{
+                                label: 'Velocità (km/h) - Giro Veloce',
+                                data: data.fastestLapTelemetry.Speed,
+                                borderColor: 'blue',
+                                fill: false,
+                                pointRadius: 0
+                            }]
+                        },
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false,
+                            scales: { 
+                                x: { title: { display: true, text: 'Distanza (m)' } } 
+                            },
+                            plugins: {
+                                legend: { display: true }
+                            }
+                        }
+                    });
+
+                    // --- Grafico 2: Acceleratore e Freno ---
+                    const ctxThrottle = document.getElementById('throttleBrakeChart').getContext('2d');
+                    throttleBrakeChartInstance = new Chart(ctxThrottle, {
+                        type: 'line',
+                        data: {
+                            labels: data.fastestLapTelemetry.Distance.map(d => d.toFixed(0) + 'm'),
+                            datasets: [{
+                                label: 'Acceleratore (%)',
+                                data: data.fastestLapTelemetry.Throttle,
+                                borderColor: 'green',
+                                fill: false,
+                                pointRadius: 0,
+                                yAxisID: 'y'
+                            }, {
+                                label: 'Freno (1/0)',
+                                data: data.fastestLapTelemetry.Brake.map(b => b * 100), // Scaliamo per lo stesso asse y
+                                borderColor: 'red',
+                                fill: false,
+                                pointRadius: 0,
+                                yAxisID: 'y'
+                            }]
+                        },
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false,
+                            scales: { 
+                                x: { title: { display: true, text: 'Distanza (m)' } }, 
+                                y: { 
+                                    min: 0, 
+                                    max: 100,
+                                    title: { display: true, text: 'Percentuale / Utilizzo' }
+                                } 
+                            },
+                             plugins: {
+                                legend: { display: true }
+                            }
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Errore nel recupero della telemetria:', error);
+                    alert("Impossibile caricare la telemetria.");
+                });
+        }
+
+        window.onclick = function(event) {
+            const modal = document.getElementById('detailsModal');
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        }
+    </script>
+</body>
+</html>
